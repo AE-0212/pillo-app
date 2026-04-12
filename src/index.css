@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+:root {
+  --color-sand: #CAAD82;
+  --color-mental: #7F613D;
+  --color-sport: #E52D40;
+  --color-food: #3C6538;
+  --color-recovery: #23283A;
+  --color-bg: #F5EDE4;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+}
