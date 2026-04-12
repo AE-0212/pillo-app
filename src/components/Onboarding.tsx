@@ -23,7 +23,7 @@ const questions = [
     subtitle: null,
     multi: false,
     options: [
-      { key: 'A', text: 'Regelmäßig Bewegung' },
+      { key: 'A', text: 'Regelmäßige Bewegung' },
       { key: 'B', text: 'Gesunde Ernährung' },
       { key: 'C', text: 'Genug Erholung' },
       { key: 'D', text: 'Stress im Alltag' },
