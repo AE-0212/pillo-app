@@ -308,13 +308,6 @@ function SummaryScreen({ answers, onFinish }: { answers: Answers; onFinish: () =
               className="flex flex-col items-center justify-center py-5 px-3 relative"
               style={{ backgroundColor: p.bg, borderRadius: '20px' }}
             >
-              {/* Recommendation badge */}
-              <span
-                className="absolute top-2 right-2 text-xs font-semibold px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: '#CAAD82', color: '#23283A' }}
-              >
-                ★
-              </span>
               {p.icon ? (
                 <i className={`fa-solid ${p.icon}`} style={{ fontSize: '28px', color: p.textColor }} />
               ) : (
