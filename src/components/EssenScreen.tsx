@@ -238,11 +238,12 @@ export default function EssenScreen({ onBack }: Props) {
             if (toMigrate.length > 0) {
               setMigrating(true)
               try {
-                await supabase
+                const migResult = await supabase
                   .from('recipes')
                   .upsert(toMigrate.map(recipeToDb), { onConflict: 'id' })
-              } catch {
-                // Migration errors are non-fatal
+                console.log('Migration result:', migResult)
+              } catch (migErr) {
+                console.error('Migration error:', migErr)
               }
               setMigrating(false)
             }
@@ -252,7 +253,10 @@ export default function EssenScreen({ onBack }: Props) {
         // ─────────────────────────────────────────────────────────────────────
 
         const { data, error } = await supabase.from('recipes').select('*')
-        if (error) throw error
+        if (error) {
+          console.error('Supabase select error:', error)
+          throw error
+        }
 
         if (!data || data.length === 0) {
           // Table is empty — seed with defaults
@@ -260,24 +264,21 @@ export default function EssenScreen({ onBack }: Props) {
             .from('recipes')
             .insert(SAMPLE_DEFAULTS.map(recipeToDb))
             .select()
-          if (insertError) throw insertError
+          if (insertError) {
+            console.error('Supabase seed error:', insertError)
+            throw insertError
+          }
           const seeded = inserted ? (inserted as DbRow[]).map(dbToRecipe) : SAMPLE_DEFAULTS
           setAllRecipes(seeded)
-          persistRecipesLocally(seeded)
         } else {
-          const recipes = (data as DbRow[]).map(dbToRecipe)
-          setAllRecipes(recipes)
-          persistRecipesLocally(recipes)
+          setAllRecipes((data as DbRow[]).map(dbToRecipe))
         }
-      } catch {
-        // Offline fallback: load from localStorage
+      } catch (err) {
+        console.error('Supabase load error:', err)
+        // Offline fallback: localStorage
         try {
           const stored = localStorage.getItem(STORAGE_KEY)
-          if (stored) {
-            setAllRecipes(JSON.parse(stored))
-          } else {
-            setAllRecipes([...SAMPLE_DEFAULTS])
-          }
+          setAllRecipes(stored ? JSON.parse(stored) : [...SAMPLE_DEFAULTS])
         } catch {
           setAllRecipes([...SAMPLE_DEFAULTS])
         }
@@ -340,16 +341,13 @@ export default function EssenScreen({ onBack }: Props) {
       isCustom: true,
     }
 
-    // Save to Supabase
-    try {
-      await supabase.from('recipes').insert([recipeToDb(r)])
-    } catch {
-      // Continue even if Supabase fails — local save below
+    const { error } = await supabase.from('recipes').insert([recipeToDb(r)])
+    if (error) {
+      console.error('Insert error:', error)
+      return
     }
 
-    const updated = [...allRecipes, r]
-    setAllRecipes(updated)
-    persistRecipesLocally(updated)
+    setAllRecipes(prev => [...prev, r])
     resetForm()
     setView('list')
   }
@@ -373,33 +371,27 @@ export default function EssenScreen({ onBack }: Props) {
       }
     })
     const updatedRecipe = updated.find(r => r.id === editingId)
+    if (!updatedRecipe) return
 
-    // Update in Supabase
-    if (updatedRecipe) {
-      try {
-        await supabase.from('recipes').update(recipeToDb(updatedRecipe)).eq('id', editingId)
-      } catch {
-        // Continue even if Supabase fails
-      }
+    const { error } = await supabase.from('recipes').update(recipeToDb(updatedRecipe)).eq('id', editingId)
+    if (error) {
+      console.error('Update error:', error)
+      return
     }
 
     setAllRecipes(updated)
-    persistRecipesLocally(updated)
     resetForm()
     setView('list')
   }
 
   async function deleteRecipe() {
-    // Delete from Supabase
-    try {
-      await supabase.from('recipes').delete().eq('id', editingId)
-    } catch {
-      // Continue even if Supabase fails
+    const { error } = await supabase.from('recipes').delete().eq('id', editingId)
+    if (error) {
+      console.error('Delete error:', error)
+      return
     }
 
-    const updated = allRecipes.filter(r => r.id !== editingId)
-    setAllRecipes(updated)
-    persistRecipesLocally(updated)
+    setAllRecipes(prev => prev.filter(r => r.id !== editingId))
     resetForm()
     setDeleteConfirm(false)
     setView('list')
