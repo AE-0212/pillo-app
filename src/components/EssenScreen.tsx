@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import EinkaufslisteScreen from './EinkaufslisteScreen'
 import { addIngredientsToShoppingList } from './shoppingListUtils'
+import { supabase } from '../lib/supabase'
 
 const GREEN = '#3C6538'
 const GREEN_LIGHT = '#D8E8D7'
@@ -18,6 +19,72 @@ interface Recipe {
   steps: string[]
   tip?: string
   isCustom?: boolean
+}
+
+// Supabase row shape (DB column names)
+interface DbRow {
+  id: string
+  name: string
+  category: string
+  cook_time: number
+  emoji: string
+  ingredients: string       // newline-separated text
+  instructions: string      // newline-separated text
+  tip?: string | null
+  vegetable_percent: number
+  carbs_percent: number
+  protein_percent: number
+  is_custom?: boolean | null
+  created_by?: string | null
+}
+
+function getBgForCategory(category: string): string {
+  const map: Record<string, string> = {
+    'Frühstück':                   'linear-gradient(135deg, #F5C842 0%, #E8A020 100%)',
+    'Hauptgericht':                'linear-gradient(135deg, #56A14E 0%, #2D7A26 100%)',
+    'Kleine Gerichte & Beilagen':  'linear-gradient(135deg, #42A5C8 0%, #1A7A9E 100%)',
+    'Snacks':                      'linear-gradient(135deg, #F5A742 0%, #E07820 100%)',
+    'Fermentation':                'linear-gradient(135deg, #8E6BBF 0%, #5E3D8F 100%)',
+    'Süßes':                       'linear-gradient(135deg, #F472B6 0%, #DB2777 100%)',
+  }
+  return map[category] ?? 'linear-gradient(135deg, #CAAD82 0%, #A08060 100%)'
+}
+
+function dbToRecipe(row: DbRow): Recipe {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    time: row.cook_time,
+    emoji: row.emoji ?? '🍽️',
+    bg: getBgForCategory(row.category),
+    macros: {
+      gemuse: row.vegetable_percent ?? 34,
+      carbs:  row.carbs_percent ?? 33,
+      protein: row.protein_percent ?? 33,
+    },
+    ingredients: row.ingredients ? row.ingredients.split('\n').filter(Boolean) : [],
+    steps:       row.instructions ? row.instructions.split('\n').filter(Boolean) : [],
+    tip:         row.tip ?? undefined,
+    isCustom:    row.is_custom ?? false,
+  }
+}
+
+function recipeToDb(r: Recipe): Omit<DbRow, 'created_by'> {
+  return {
+    id:                r.id,
+    name:              r.name,
+    category:          r.category,
+    cook_time:         r.time,
+    emoji:             r.emoji,
+    ingredients:       r.ingredients.join('\n'),
+    instructions:      r.steps.join('\n'),
+    tip:               r.tip ?? null,
+    vegetable_percent: r.macros.gemuse,
+    carbs_percent:     r.macros.carbs,
+    protein_percent:   r.macros.protein,
+    is_custom:         r.isCustom ?? false,
+  }
 }
 
 const SAMPLE_DEFAULTS: Recipe[] = [
@@ -108,21 +175,7 @@ const SAMPLE_DEFAULTS: Recipe[] = [
 
 const STORAGE_KEY = 'essen-all-recipes'
 
-function loadRecipes(): Recipe[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) return JSON.parse(stored)
-    // First launch: seed with defaults + any legacy custom recipes
-    const legacy: Recipe[] = JSON.parse(localStorage.getItem('essen-custom-recipes') ?? '[]')
-    const initial = [...SAMPLE_DEFAULTS, ...legacy]
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial))
-    return initial
-  } catch {
-    return [...SAMPLE_DEFAULTS]
-  }
-}
-
-function persistRecipes(recipes: Recipe[]) {
+function persistRecipesLocally(recipes: Recipe[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(recipes))
 }
 
@@ -152,7 +205,8 @@ export default function EssenScreen({ onBack }: Props) {
     try { return new Set(JSON.parse(localStorage.getItem('essen-saved-recipes') ?? '[]')) }
     catch { return new Set() }
   })
-  const [allRecipes, setAllRecipes] = useState<Recipe[]>(loadRecipes)
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([])
+  const [loading, setLoading] = useState(true)
   const [cartToast, setCartToast] = useState(false)
 
   // Form state (shared between add and edit)
@@ -165,6 +219,48 @@ export default function EssenScreen({ onBack }: Props) {
   const [fCarbs, setFCarbs] = useState('')
   const [fProtein, setFProtein] = useState('')
   const [fTip, setFTip] = useState('')
+
+  // Load recipes from Supabase on mount
+  useEffect(() => {
+    async function loadFromSupabase() {
+      setLoading(true)
+      try {
+        const { data, error } = await supabase.from('recipes').select('*')
+        if (error) throw error
+
+        if (!data || data.length === 0) {
+          // Table is empty — seed with defaults
+          const { data: inserted, error: insertError } = await supabase
+            .from('recipes')
+            .insert(SAMPLE_DEFAULTS.map(recipeToDb))
+            .select()
+          if (insertError) throw insertError
+          const seeded = inserted ? (inserted as DbRow[]).map(dbToRecipe) : SAMPLE_DEFAULTS
+          setAllRecipes(seeded)
+          persistRecipesLocally(seeded)
+        } else {
+          const recipes = (data as DbRow[]).map(dbToRecipe)
+          setAllRecipes(recipes)
+          persistRecipesLocally(recipes)
+        }
+      } catch {
+        // Offline fallback: load from localStorage
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY)
+          if (stored) {
+            setAllRecipes(JSON.parse(stored))
+          } else {
+            setAllRecipes([...SAMPLE_DEFAULTS])
+          }
+        } catch {
+          setAllRecipes([...SAMPLE_DEFAULTS])
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadFromSupabase()
+  }, [])
 
   const filtered = allRecipes.filter(r => {
     const matchCat = filter === 'Alle' || (filter === 'Favoriten' ? saved.has(r.id) : r.category === filter)
@@ -199,7 +295,7 @@ export default function EssenScreen({ onBack }: Props) {
     setView('edit')
   }
 
-  function saveRecipe() {
+  async function saveRecipe() {
     const r: Recipe = {
       id: `custom-${Date.now()}`,
       name: fName || 'Unbenanntes Rezept',
@@ -217,14 +313,22 @@ export default function EssenScreen({ onBack }: Props) {
       tip: fTip.trim() || undefined,
       isCustom: true,
     }
+
+    // Save to Supabase
+    try {
+      await supabase.from('recipes').insert([recipeToDb(r)])
+    } catch {
+      // Continue even if Supabase fails — local save below
+    }
+
     const updated = [...allRecipes, r]
     setAllRecipes(updated)
-    persistRecipes(updated)
+    persistRecipesLocally(updated)
     resetForm()
     setView('list')
   }
 
-  function updateRecipe() {
+  async function updateRecipe() {
     const updated = allRecipes.map(r => {
       if (r.id !== editingId) return r
       return {
@@ -242,16 +346,34 @@ export default function EssenScreen({ onBack }: Props) {
         tip: fTip.trim() || undefined,
       }
     })
+    const updatedRecipe = updated.find(r => r.id === editingId)
+
+    // Update in Supabase
+    if (updatedRecipe) {
+      try {
+        await supabase.from('recipes').update(recipeToDb(updatedRecipe)).eq('id', editingId)
+      } catch {
+        // Continue even if Supabase fails
+      }
+    }
+
     setAllRecipes(updated)
-    persistRecipes(updated)
+    persistRecipesLocally(updated)
     resetForm()
     setView('list')
   }
 
-  function deleteRecipe() {
+  async function deleteRecipe() {
+    // Delete from Supabase
+    try {
+      await supabase.from('recipes').delete().eq('id', editingId)
+    } catch {
+      // Continue even if Supabase fails
+    }
+
     const updated = allRecipes.filter(r => r.id !== editingId)
     setAllRecipes(updated)
-    persistRecipes(updated)
+    persistRecipesLocally(updated)
     resetForm()
     setDeleteConfirm(false)
     setView('list')
@@ -669,71 +791,89 @@ export default function EssenScreen({ onBack }: Props) {
         </div>
       </div>
 
+      {/* Loading indicator */}
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', gap: 16 }}>
+          <div style={{
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            border: `3px solid ${GREEN_LIGHT}`,
+            borderTopColor: GREEN,
+            animation: 'spin 0.8s linear infinite',
+          }} />
+          <p style={{ color: '#9E9E9E', fontSize: 14 }}>Rezepte werden geladen…</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
       {/* Recipe cards */}
-      <div style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {filtered.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: '#9E9E9E', fontSize: 14 }}>
-            Keine Rezepte gefunden
-          </div>
-        )}
-        {filtered.map(r => (
-          <button
-            key={r.id}
-            onClick={() => { setSelectedRecipe(r); setView('detail') }}
-            style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-          >
-            <div style={{ backgroundColor: '#FFFFFF', borderRadius: 20, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
-              {/* Image area */}
-              <div style={{ background: r.bg, height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                <span style={{ fontSize: 64 }}>{r.emoji}</span>
-                {/* Edit + Heart */}
-                <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={(e) => openEdit(r, e)}
-                    style={{ width: 34, height: 34, borderRadius: '50%', backgroundColor: 'rgba(0,0,0,0.22)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <i className="fa-solid fa-pen" style={{ color: '#FFF', fontSize: 13 }} />
-                  </button>
-                  <button
-                    onClick={(e) => toggleSaved(r.id, e)}
-                    style={{ width: 34, height: 34, borderRadius: '50%', backgroundColor: 'rgba(0,0,0,0.22)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <i className={saved.has(r.id) ? 'fa-solid fa-heart' : 'fa-regular fa-heart'} style={{ color: saved.has(r.id) ? '#FF6B6B' : '#FFF', fontSize: 14 }} />
-                  </button>
-                </div>
-                {r.isCustom && (
-                  <span style={{ position: 'absolute', top: 12, left: 12, fontSize: 11, fontWeight: 700, color: GREEN, backgroundColor: 'rgba(255,255,255,0.9)', padding: '3px 9px', borderRadius: 10 }}>
-                    Eigenes Rezept
-                  </span>
-                )}
-              </div>
-              {/* Content */}
-              <div style={{ padding: '14px 16px 16px' }}>
-                <p style={{ color: '#23283A', fontSize: 16, fontWeight: 700, marginBottom: 8 }}>{r.name}</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#9E9E9E', fontSize: 12 }}>
-                    <i className="fa-regular fa-clock" style={{ fontSize: 12 }} /> {r.time} Min
-                  </span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: GREEN, backgroundColor: GREEN_LIGHT, padding: '3px 9px', borderRadius: 10 }}>
-                    {r.category}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#2E7D32', backgroundColor: '#E8F5E9', padding: '4px 9px', borderRadius: 10 }}>
-                    {r.macros.gemuse}% Gemüse
-                  </span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#F57F17', backgroundColor: '#FFF8E1', padding: '4px 9px', borderRadius: 10 }}>
-                    {r.macros.carbs}% Carbs
-                  </span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#C62828', backgroundColor: '#FCE4EC', padding: '4px 9px', borderRadius: 10 }}>
-                    {r.macros.protein}% Protein
-                  </span>
-                </div>
-              </div>
+      {!loading && (
+        <div style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {filtered.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9E9E9E', fontSize: 14 }}>
+              Keine Rezepte gefunden
             </div>
-          </button>
-        ))}
-      </div>
+          )}
+          {filtered.map(r => (
+            <button
+              key={r.id}
+              onClick={() => { setSelectedRecipe(r); setView('detail') }}
+              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+            >
+              <div style={{ backgroundColor: '#FFFFFF', borderRadius: 20, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}>
+                {/* Image area */}
+                <div style={{ background: r.bg, height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                  <span style={{ fontSize: 64 }}>{r.emoji}</span>
+                  {/* Edit + Heart */}
+                  <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={(e) => openEdit(r, e)}
+                      style={{ width: 34, height: 34, borderRadius: '50%', backgroundColor: 'rgba(0,0,0,0.22)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <i className="fa-solid fa-pen" style={{ color: '#FFF', fontSize: 13 }} />
+                    </button>
+                    <button
+                      onClick={(e) => toggleSaved(r.id, e)}
+                      style={{ width: 34, height: 34, borderRadius: '50%', backgroundColor: 'rgba(0,0,0,0.22)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <i className={saved.has(r.id) ? 'fa-solid fa-heart' : 'fa-regular fa-heart'} style={{ color: saved.has(r.id) ? '#FF6B6B' : '#FFF', fontSize: 14 }} />
+                    </button>
+                  </div>
+                  {r.isCustom && (
+                    <span style={{ position: 'absolute', top: 12, left: 12, fontSize: 11, fontWeight: 700, color: GREEN, backgroundColor: 'rgba(255,255,255,0.9)', padding: '3px 9px', borderRadius: 10 }}>
+                      Eigenes Rezept
+                    </span>
+                  )}
+                </div>
+                {/* Content */}
+                <div style={{ padding: '14px 16px 16px' }}>
+                  <p style={{ color: '#23283A', fontSize: 16, fontWeight: 700, marginBottom: 8 }}>{r.name}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#9E9E9E', fontSize: 12 }}>
+                      <i className="fa-regular fa-clock" style={{ fontSize: 12 }} /> {r.time} Min
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: GREEN, backgroundColor: GREEN_LIGHT, padding: '3px 9px', borderRadius: 10 }}>
+                      {r.category}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#2E7D32', backgroundColor: '#E8F5E9', padding: '4px 9px', borderRadius: 10 }}>
+                      {r.macros.gemuse}% Gemüse
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#F57F17', backgroundColor: '#FFF8E1', padding: '4px 9px', borderRadius: 10 }}>
+                      {r.macros.carbs}% Carbs
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#C62828', backgroundColor: '#FCE4EC', padding: '4px 9px', borderRadius: 10 }}>
+                      {r.macros.protein}% Protein
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* FAB — Cart */}
       <button
