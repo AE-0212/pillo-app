@@ -174,6 +174,7 @@ const SAMPLE_DEFAULTS: Recipe[] = [
 ]
 
 const STORAGE_KEY = 'essen-all-recipes'
+const MIGRATION_KEY = 'essen-migration-done'
 
 function persistRecipesLocally(recipes: Recipe[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(recipes))
@@ -207,6 +208,7 @@ export default function EssenScreen({ onBack }: Props) {
   })
   const [allRecipes, setAllRecipes] = useState<Recipe[]>([])
   const [loading, setLoading] = useState(true)
+  const [migrating, setMigrating] = useState(false)
   const [cartToast, setCartToast] = useState(false)
 
   // Form state (shared between add and edit)
@@ -225,6 +227,30 @@ export default function EssenScreen({ onBack }: Props) {
     async function loadFromSupabase() {
       setLoading(true)
       try {
+        // ── One-time migration: push local custom recipes to Supabase ──────────
+        if (!localStorage.getItem(MIGRATION_KEY)) {
+          const stored = localStorage.getItem(STORAGE_KEY)
+          if (stored) {
+            const localRecipes: Recipe[] = JSON.parse(stored)
+            const toMigrate = localRecipes.filter(
+              r => r.isCustom === true || r.id.startsWith('custom-')
+            )
+            if (toMigrate.length > 0) {
+              setMigrating(true)
+              try {
+                await supabase
+                  .from('recipes')
+                  .upsert(toMigrate.map(recipeToDb), { onConflict: 'id' })
+              } catch {
+                // Migration errors are non-fatal
+              }
+              setMigrating(false)
+            }
+          }
+          localStorage.setItem(MIGRATION_KEY, 'true')
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         const { data, error } = await supabase.from('recipes').select('*')
         if (error) throw error
 
@@ -802,7 +828,9 @@ export default function EssenScreen({ onBack }: Props) {
             borderTopColor: GREEN,
             animation: 'spin 0.8s linear infinite',
           }} />
-          <p style={{ color: '#9E9E9E', fontSize: 14 }}>Rezepte werden geladen…</p>
+          <p style={{ color: '#9E9E9E', fontSize: 14 }}>
+            {migrating ? 'Rezepte werden synchronisiert…' : 'Rezepte werden geladen…'}
+          </p>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
