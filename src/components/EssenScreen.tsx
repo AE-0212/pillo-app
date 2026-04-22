@@ -323,6 +323,8 @@ export default function EssenScreen({ onBack }: Props) {
   }
 
   async function saveRecipe() {
+    const recipeData = { fName, fCategory, fTime, fGemuse, fCarbs, fProtein, fIngredients, fSteps, fTip }
+    console.log("saveRecipe aufgerufen", recipeData)
     const r: Recipe = {
       id: `custom-${Date.now()}`,
       name: fName || 'Unbenanntes Rezept',
@@ -353,6 +355,8 @@ export default function EssenScreen({ onBack }: Props) {
   }
 
   async function updateRecipe() {
+    const recipeData = { editingId, fName, fCategory, fTime, fGemuse, fCarbs, fProtein, fIngredients, fSteps, fTip }
+    console.log("saveRecipe aufgerufen", recipeData)
     const updated = allRecipes.map(r => {
       if (r.id !== editingId) return r
       return {
