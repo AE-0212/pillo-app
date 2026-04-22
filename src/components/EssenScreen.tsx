@@ -178,10 +178,6 @@ const SAMPLE_DEFAULTS: Recipe[] = [
 const STORAGE_KEY = 'essen-all-recipes'
 const MIGRATION_KEY = 'essen-migration-done'
 
-function persistRecipesLocally(recipes: Recipe[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(recipes))
-}
-
 const RAINBOW = [
   { color: '#E53935', label: 'Rot' },
   { color: '#FB8C00', label: 'Orange' },
