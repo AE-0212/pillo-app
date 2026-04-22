@@ -225,6 +225,8 @@ export default function EssenScreen({ onBack }: Props) {
   // Load recipes from Supabase on mount
   useEffect(() => {
     async function loadFromSupabase() {
+      const test = await supabase.from('recipes').select('count(*)')
+      console.log('Supabase test:', test)
       setLoading(true)
       try {
         // ── One-time migration: push local custom recipes to Supabase ──────────
