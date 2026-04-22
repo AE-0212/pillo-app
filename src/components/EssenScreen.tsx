@@ -3,6 +3,8 @@ import EinkaufslisteScreen from './EinkaufslisteScreen'
 import { addIngredientsToShoppingList } from './shoppingListUtils'
 import { supabase } from '../lib/supabase'
 
+console.log("EssenScreen geladen")
+
 const GREEN = '#3C6538'
 const GREEN_LIGHT = '#D8E8D7'
 const CATEGORIES = ['Alle', 'Favoriten', 'Frühstück', 'Hauptgericht', 'Kleine Gerichte & Beilagen', 'Snacks', 'Fermentation', 'Süßes']
@@ -225,6 +227,7 @@ export default function EssenScreen({ onBack }: Props) {
   // Load recipes from Supabase on mount
   useEffect(() => {
     async function loadFromSupabase() {
+      console.log("loadFromSupabase wird ausgeführt")
       const test = await supabase.from('recipes').select('count(*)')
       console.log('Supabase test:', test)
       setLoading(true)
