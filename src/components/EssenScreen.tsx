@@ -208,6 +208,7 @@ export default function EssenScreen({ onBack }: Props) {
   const [loading, setLoading] = useState(true)
   const [migrating, setMigrating] = useState(false)
   const [cartToast, setCartToast] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Form state (shared between add and edit)
   const [fName, setFName] = useState('')
@@ -224,7 +225,7 @@ export default function EssenScreen({ onBack }: Props) {
   useEffect(() => {
     async function loadFromSupabase() {
       console.log("loadFromSupabase wird ausgeführt")
-      const test = await supabase.from('recipes').select('count(*)')
+      const test = await supabase.from('recipes').select('*', { count: 'exact', head: true })
       console.log('Supabase test:', test)
       setLoading(true)
       try {
@@ -323,48 +324,19 @@ export default function EssenScreen({ onBack }: Props) {
     setView('edit')
   }
 
-  async function saveRecipe() {
-    const recipeData = { fName, fCategory, fTime, fGemuse, fCarbs, fProtein, fIngredients, fSteps, fTip }
-    console.log("saveRecipe aufgerufen", recipeData)
-    const r: Recipe = {
-      id: `custom-${Date.now()}`,
-      name: fName || 'Unbenanntes Rezept',
-      category: fCategory,
-      time: Math.max(1, parseInt(fTime) || 20),
-      emoji: '🍽️',
-      bg: 'linear-gradient(135deg, #CAAD82 0%, #A08060 100%)',
-      macros: {
-        gemuse: Math.min(100, Math.max(0, parseInt(fGemuse) || 34)),
-        carbs:  Math.min(100, Math.max(0, parseInt(fCarbs)  || 33)),
-        protein: Math.min(100, Math.max(0, parseInt(fProtein) || 33)),
-      },
-      ingredients: fIngredients.split('\n').map(s => s.trim()).filter(Boolean),
-      steps: fSteps.split('\n').map(s => s.trim()).filter(Boolean),
-      tip: fTip.trim() || undefined,
-      isCustom: true,
-    }
-
-    const { error } = await supabase.from('recipes').insert([recipeToDb(r)])
-    if (error) {
-      console.error('Insert error:', error)
-      return
-    }
-
-    setAllRecipes(prev => [...prev, r])
-    resetForm()
-    setView('list')
-  }
-
-  async function updateRecipe() {
-    const recipeData = { editingId, fName, fCategory, fTime, fGemuse, fCarbs, fProtein, fIngredients, fSteps, fTip }
-    console.log("saveRecipe aufgerufen", recipeData)
-    const updated = allRecipes.map(r => {
-      if (r.id !== editingId) return r
-      return {
-        ...r,
+  async function saveRecipe(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    console.log("saveRecipe aufgerufen", { fName, fCategory, fTime })
+    try {
+      const r: Recipe = {
+        id: `custom-${Date.now()}`,
         name: fName || 'Unbenanntes Rezept',
         category: fCategory,
         time: Math.max(1, parseInt(fTime) || 20),
+        emoji: '🍽️',
+        bg: 'linear-gradient(135deg, #CAAD82 0%, #A08060 100%)',
         macros: {
           gemuse: Math.min(100, Math.max(0, parseInt(fGemuse) || 34)),
           carbs:  Math.min(100, Math.max(0, parseInt(fCarbs)  || 33)),
@@ -373,20 +345,51 @@ export default function EssenScreen({ onBack }: Props) {
         ingredients: fIngredients.split('\n').map(s => s.trim()).filter(Boolean),
         steps: fSteps.split('\n').map(s => s.trim()).filter(Boolean),
         tip: fTip.trim() || undefined,
+        isCustom: true,
       }
-    })
-    const updatedRecipe = updated.find(r => r.id === editingId)
-    if (!updatedRecipe) return
-
-    const { error } = await supabase.from('recipes').update(recipeToDb(updatedRecipe)).eq('id', editingId)
-    if (error) {
-      console.error('Update error:', error)
-      return
+      const { error } = await supabase.from('recipes').insert([recipeToDb(r)])
+      if (error) { console.error('Insert error:', error); return }
+      setAllRecipes(prev => [...prev, r])
+      resetForm()
+      setView('list')
+    } finally {
+      setIsSubmitting(false)
     }
+  }
 
-    setAllRecipes(updated)
-    resetForm()
-    setView('list')
+  async function updateRecipe(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    console.log("updateRecipe aufgerufen", { editingId, fName })
+    try {
+      const updated = allRecipes.map(r => {
+        if (r.id !== editingId) return r
+        return {
+          ...r,
+          name: fName || 'Unbenanntes Rezept',
+          category: fCategory,
+          time: Math.max(1, parseInt(fTime) || 20),
+          macros: {
+            gemuse: Math.min(100, Math.max(0, parseInt(fGemuse) || 34)),
+            carbs:  Math.min(100, Math.max(0, parseInt(fCarbs)  || 33)),
+            protein: Math.min(100, Math.max(0, parseInt(fProtein) || 33)),
+          },
+          ingredients: fIngredients.split('\n').map(s => s.trim()).filter(Boolean),
+          steps: fSteps.split('\n').map(s => s.trim()).filter(Boolean),
+          tip: fTip.trim() || undefined,
+        }
+      })
+      const updatedRecipe = updated.find(r => r.id === editingId)
+      if (!updatedRecipe) return
+      const { error } = await supabase.from('recipes').update(recipeToDb(updatedRecipe)).eq('id', editingId)
+      if (error) { console.error('Update error:', error); return }
+      setAllRecipes(updated)
+      resetForm()
+      setView('list')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   async function deleteRecipe() {
@@ -701,8 +704,8 @@ export default function EssenScreen({ onBack }: Props) {
         <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 390, padding: '16px 24px 32px', backgroundColor: '#F5EDE4', borderTop: '1px solid rgba(60,101,56,0.12)' }}>
           <button
             onClick={isEdit ? updateRecipe : saveRecipe}
-            disabled={!canSave}
-            style={{ width: '100%', padding: '15px', borderRadius: 20, border: 'none', backgroundColor: GREEN, color: '#FFF', fontSize: 15, fontWeight: 700, cursor: canSave ? 'pointer' : 'not-allowed', opacity: canSave ? 1 : 0.35, transition: 'opacity 0.2s' }}
+            disabled={!canSave || isSubmitting}
+            style={{ width: '100%', padding: '15px', borderRadius: 20, border: 'none', backgroundColor: GREEN, color: '#FFF', fontSize: 15, fontWeight: 700, cursor: canSave ? 'pointer' : 'not-allowed', opacity: canSave && !isSubmitting ? 1 : 0.35, transition: 'opacity 0.2s' }}
           >
             {isEdit ? 'Änderungen speichern' : 'Rezept speichern'}
           </button>
